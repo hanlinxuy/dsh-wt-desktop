@@ -34,9 +34,10 @@ if (useLocal) {
   console.log(`self-built exec-server at ${server.url}${token !== undefined ? ' (token-auth)' : ''}`)
 }
 
+const effectiveToken = token ?? remoteToken
 const config = process.env.DSSH_SMOKE_URL ?? server?.url
-  ? { url: process.env.DSSH_SMOKE_URL ?? server.url, cwd: smokeCwd, ...(token !== undefined ? { token } : {}) }
-  : { host, remoteExecPort, localTunnelPort, cwd: smokeCwd, ...(remoteToken !== undefined ? { token: remoteToken } : {}) }
+  ? { url: process.env.DSSH_SMOKE_URL ?? server.url, cwd: smokeCwd, ...(effectiveToken !== undefined ? { token: effectiveToken } : {}) }
+  : { host, remoteExecPort, localTunnelPort, cwd: smokeCwd, ...(effectiveToken !== undefined ? { token: effectiveToken } : {}) }
 
 const ctx = new Context()
 const fiber = ctx.plugin(plugin, config)
