@@ -65,7 +65,7 @@ cat > /tmp/dshssh-remote-patch.yml <<YAML
         seam: true
         url: ws://127.0.0.1:18765
         token: '$REVERSE_TOKEN'
-        cwd: /Users/USER/dshssh-reverse-workspace
+        cwd: $HOME/dshssh-reverse-workspace
 YAML
 scp "${SSH_OPTS[@]}" /tmp/dshssh-remote-patch.yml "$HOST:$PROF_REMOTE/cordis.patch.yml"
 rm -f /tmp/dshssh-remote-patch.yml
