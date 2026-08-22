@@ -57,6 +57,24 @@ export class RemoteRuntimeManager {
     return record
   }
 
+  /** Register a configured host as offline (GUI-only mode): visible in the dock, connect on demand. */
+  ensureOffline(name: string, options: { cwd?: string; remoteExecPort?: number; localTunnelPort?: number; token?: string } = {}): ManagedHost {
+    const existing = this.hosts.get(name)
+    if (existing !== undefined) return existing
+    const record: ManagedHost = {
+      name,
+      state: 'offline',
+      remoteExecPort: options.remoteExecPort ?? 8765,
+      localTunnelPort: options.localTunnelPort ?? 8876,
+      token: options.token,
+      cwd: options.cwd ?? '/tmp',
+      transport: null,
+      logs: [{ at: new Date().toISOString(), level: 'info', text: 'configured host (offline) — click 连接 to bring up' }],
+    }
+    this.hosts.set(name, record)
+    return record
+  }
+
   /** Connect one host: spawn ssh -L + handshake with the remote exec-server. */
   async connect(host: string, options: { remoteExecPort?: number; localTunnelPort?: number; token?: string; cwd?: string } = {}): Promise<ManagedHost> {
     const existing = this.hosts.get(host)

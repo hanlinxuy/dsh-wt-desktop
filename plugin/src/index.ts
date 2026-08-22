@@ -56,19 +56,29 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   ctx.effect(() => () => manager.dispose(), 'dshssh manager teardown')
 
   // 2) 配置驱动的 seam 自动连接（seam !== false 且配置了 host/url 时替换本地 subprocess/fs）
-  if (config.seam !== false && (config.host !== undefined || config.url !== undefined)) {
-    const transport = config.url !== undefined
-      ? await (async () => {
-          const t = new ExecTransport(config.url!, config.cwd, config.token)
-          await t.connect()
-          return t
-        })()
-      : await ExecTransport.viaTunnel(config.host!, config.remoteExecPort ?? 8765, config.localTunnelPort ?? 8876, 20000, config.cwd, config.token)
-    ctx.provide('sshTransport', transport)
-    ctx.effect(() => () => transport.close(), 'dshssh transport teardown')
-    ctx.plugin(RemoteSubprocessRuntime)
-    ctx.plugin(RemoteFileSystem)
-    manager.register(config.host ?? 'direct', transport, { cwd: config.cwd })
+  if (config.host !== undefined || config.url !== undefined) {
+    if (config.seam === false) {
+      // GUI-only 模式：预注册配置的 host（offline），dock 可见、点击即连。
+      manager.ensureOffline(config.host ?? 'direct', {
+        remoteExecPort: config.remoteExecPort ?? 8765,
+        localTunnelPort: config.localTunnelPort ?? 8876,
+        token: config.token,
+        cwd: config.cwd,
+      })
+    } else {
+      const transport = config.url !== undefined
+        ? await (async () => {
+            const t = new ExecTransport(config.url!, config.cwd, config.token)
+            await t.connect()
+            return t
+          })()
+        : await ExecTransport.viaTunnel(config.host!, config.remoteExecPort ?? 8765, config.localTunnelPort ?? 8876, 20000, config.cwd, config.token)
+      ctx.provide('sshTransport', transport)
+      ctx.effect(() => () => transport.close(), 'dshssh transport teardown')
+      ctx.plugin(RemoteSubprocessRuntime)
+      ctx.plugin(RemoteFileSystem)
+      manager.register(config.host ?? 'direct', transport, { cwd: config.cwd })
+    }
   }
 
   // 3) /remote 命令 + /api/dshssh HTTP 接口（GUI dock 数据源）

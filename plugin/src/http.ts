@@ -2,29 +2,28 @@
  * /api/dshssh — JSON state + action endpoints consumed by the GUI dock.
  * GET  /api/dshssh/state   -> { hosts: [{name,state,lastError,logs:[...]}] }
  * POST /api/dshssh/action  -> { host, action: connect|disconnect|smoke|deploy|verify }
+ *
+ * Registers on whichever HTTP carrier exists: `webServer` (dsh-my-rsi/upstream)
+ * or `httpServer` (desktop). Uses a scoped `ctx.inject` so the route appears
+ * once the carrier loads, regardless of loader entry order; in bare test
+ * contexts (no carrier) the scope simply never activates.
  * @module @dsh-external/dshssh/http
  */
 import type { Context } from 'cordis'
 import type { RemoteRuntimeManager } from './manager.ts'
 
+interface HttpHandler {
+  register(opts: { kind: 'prefix'; path: string; handler: (req: unknown, res: unknown) => void }): unknown
+}
+interface HttpReq { url?: string; method?: string; on?(event: 'data' | 'end', cb: (chunk?: Buffer) => void): void }
+interface HttpRes { writeHead(code: number, headers?: Record<string, string>): void; end(body: string): void }
+
 export function registerHttp(ctx: Context, manager: RemoteRuntimeManager): void {
-  interface HttpHandler {
-    register(opts: { kind: 'prefix'; path: string; handler: (req: unknown, res: unknown) => void }): unknown
-  }
-  interface HttpReq { url?: string; method?: string; on?(event: 'data' | 'end', cb: (chunk?: Buffer) => void): void }
-  interface HttpRes { writeHead(code: number, headers?: Record<string, string>): void; end(body: string): void }
-  const httpServer = (ctx as unknown as { get?(name: string, loose?: boolean): unknown }).get?.('httpServer', false) as HttpHandler | undefined
-  if (httpServer === undefined) return
-
-  const send = (response: HttpRes, code: number, body: unknown): void => {
-    response.writeHead(code, { 'content-type': 'application/json' })
-    response.end(JSON.stringify(body))
-  }
-
-  ctx.effect(() => httpServer.register({
-    kind: 'prefix',
-    path: '/api/dshssh',
-    handler: (request: unknown, response: unknown) => {
+  const registerOn = (server: HttpHandler): void => {
+    ctx.effect(() => server.register({
+      kind: 'prefix',
+      path: '/api/dshssh',
+      handler: (request: unknown, response: unknown) => {
         const req = request as HttpReq
         const res = response as HttpRes
         const url = new URL(req.url ?? '/', 'http://localhost')
@@ -73,4 +72,25 @@ export function registerHttp(ctx: Context, manager: RemoteRuntimeManager): void 
         send(res, 404, { error: 'not found' })
       },
     }) as unknown as () => void, 'dshssh: http routes')
+  }
+
+  // Eager attempt (carrier may already be present at apply time).
+  for (const name of ['webServer', 'httpServer'] as const) {
+    try {
+      const server = (ctx as unknown as Record<string, unknown>)[name]
+      if (server !== undefined) {
+        registerOn(server as HttpHandler)
+        return
+      }
+    } catch { /* not injected yet — fall through to scoped inject */ }
+  }
+  // Scoped inject: activate when the carrier loads (entry-order independent).
+  ctx.inject(['webServer'] as never, (scope: Context) => {
+    registerOn((scope as unknown as { webServer: HttpHandler }).webServer)
+  })
+}
+
+function send(response: HttpRes, code: number, body: unknown): void {
+  response.writeHead(code, { 'content-type': 'application/json' })
+  response.end(JSON.stringify(body))
 }
