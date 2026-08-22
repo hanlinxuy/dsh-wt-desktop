@@ -12,6 +12,16 @@
   2. 反向执行编排（远端 DSH agent → 反向隧道 → 本机，受目录白名单约束）；
   3. GUI 建议操作面板（会话 dock / 侧栏：状态灯 + Connect/Deploy/Verify/Smoke/Reverse/Disconnect + 日志抽屉）。
 
+## 技术路线（定案 2026-08-22）
+
+- **不 fork 桌面壳**：`anywhere-labs/deepseek-harness-desktop`（当前版本 v2.0.x，MIT）保持原样作为宿主；桌面本身是插件，用户插件经 profile bundles 组合。
+- **发行版 = 插件集 + profile 组合 + 可选打包 overlay**：
+  1. 插件集（本仓库）：`third-party/`（vendored dsh-ssh 等）+ `plugin/`（自研 dshssh）；
+  2. `profile/`：bundles 清单 + `cordis.patch.yml` + 版本 pin；
+  3. 可选打包 overlay：基于上游 release 源码构建 + overlay 默认 profile（不改壳源码），出 wt 版安装包。
+- **跟随上游 = 版本 pin 表 + 每版重构建**：上游 2–3 天/版；维护「desktop 版本 ↔ 插件版本」对照表，升级只动 pin。
+- **兼容性保证**：插件声明 engines/依赖范围（当前 `@deepseek-ai/dsh-* ^0.1.0-rc.6` ↔ desktop rc.7）；CI 发布前在 desktop profile 里跑正/反向冒烟（复用 `scripts/verify-*.sh`）。
+
 ## 仓库结构
 
 ```text
@@ -28,10 +38,12 @@ dsh-wt-desktop/
 
 ## 状态
 
-- ✅ 传输层（scripts/）+ 部署（runtime/）已在 homelinux2 跑通：`codex exec-server` systemd 常驻 + 正向隧道 + `uname`/fs 探针冒烟全绿。
-- ⏳ `third-party/` 选型与 vendoring（候选：`dsh-ssh`，seam 级正向执行基底）
-- ⏳ `plugin/`（自研：部署编排 + 反向执行 + GUI 建议操作）
-- ⏳ `profile/` 组装与 `compose.sh`
+- ✅ 传输层（scripts/）+ 部署（runtime/）：`codex exec-server` systemd 常驻 + 正向隧道 + `uname`/fs 探针冒烟全绿（homelinux2）。
+- ✅ **自研 seam provider（plugin/）S1**：`ctx.subprocess` 远程实现（exec-server 传输 + ssh -L 隧道），**keyless 冒烟全绿**（mock exec-server：uname / env 透传 / 退出码）。
+- ⏳ 真实远端 seam 冒烟：待 homelinux2 网络可达（当前 LAN 不通）。
+- ⏳ `plugin/` S2：`ctx.fs` 远程实现（exec-server fs/* RPC）。
+- ⏳ 部署编排工具 + `/remote` 命令 + GUI 建议操作面板。
+- ⏳ `profile/` 组装、版本 pin 表与 `compose.sh`；可选：上游源码构建 + overlay 打包。
 
 ## 快速使用（传输层）
 
