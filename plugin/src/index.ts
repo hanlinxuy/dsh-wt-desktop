@@ -93,6 +93,28 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
         record.lastError = message
         record.logs.push({ at: new Date().toISOString(), level: 'error', text: `seam connect failed (local execution kept): ${message}` })
         ctx.logger?.warn?.(`[dshssh] seam connect failed, keeping local execution: ${message}`)
+        // 后台重试：隧道/网络恢复后自动挂上 seam（自愈），上限 ~5 分钟。
+        void (async () => {
+          for (let attempt = 1; attempt <= 30; attempt++) {
+            await new Promise((r) => setTimeout(r, 10000))
+            try {
+              const transport = config.url !== undefined
+                ? await (async () => {
+                    const t = new ExecTransport(config.url!, config.cwd, config.token)
+                    await t.connect()
+                    return t
+                  })()
+                : await ExecTransport.viaTunnel(config.host!, config.remoteExecPort ?? 8765, config.localTunnelPort ?? 8876, 20000, config.cwd, config.token)
+              ctx.provide('sshTransport', transport)
+              ctx.effect(() => () => transport.close(), 'dshssh transport teardown (retry)')
+              ctx.plugin(RemoteSubprocessRuntime)
+              ctx.plugin(RemoteFileSystem)
+              manager.register(config.host ?? 'direct', transport, { cwd: config.cwd })
+              ctx.logger?.info?.(`[dshssh] seam connected after retry ${attempt}`)
+              return
+            } catch { /* keep retrying */ }
+          }
+        })()
       }
     }
   }
