@@ -30,6 +30,10 @@ export default [
     fixedExtension: false,
     dts: true,
     clean: true,
+    // Self-contained bundle: bundle everything except cordis (framework identity
+    // must stay shared) and node builtins, so the plugin works when installed
+    // via file:/git links without its own node_modules.
+    noExternal: (id: string) => (id === 'cordis' || id.startsWith('node:') ? undefined : true),
   },
   {
     // 自建 headless runtime：单文件产物（ws 已打包），部署到目标机只需 Node。

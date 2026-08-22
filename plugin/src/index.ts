@@ -66,18 +66,34 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
         cwd: config.cwd,
       })
     } else {
-      const transport = config.url !== undefined
-        ? await (async () => {
-            const t = new ExecTransport(config.url!, config.cwd, config.token)
-            await t.connect()
-            return t
-          })()
-        : await ExecTransport.viaTunnel(config.host!, config.remoteExecPort ?? 8765, config.localTunnelPort ?? 8876, 20000, config.cwd, config.token)
-      ctx.provide('sshTransport', transport)
-      ctx.effect(() => () => transport.close(), 'dshssh transport teardown')
-      ctx.plugin(RemoteSubprocessRuntime)
-      ctx.plugin(RemoteFileSystem)
-      manager.register(config.host ?? 'direct', transport, { cwd: config.cwd })
+      // seam 模式：连接失败必须降级而不是拖垮整个 profile boot —— 保持本地执行缝，
+      // 标记错误并允许 dock/命令稍后重连。
+      try {
+        const transport = config.url !== undefined
+          ? await (async () => {
+              const t = new ExecTransport(config.url!, config.cwd, config.token)
+              await t.connect()
+              return t
+            })()
+          : await ExecTransport.viaTunnel(config.host!, config.remoteExecPort ?? 8765, config.localTunnelPort ?? 8876, 20000, config.cwd, config.token)
+        ctx.provide('sshTransport', transport)
+        ctx.effect(() => () => transport.close(), 'dshssh transport teardown')
+        ctx.plugin(RemoteSubprocessRuntime)
+        ctx.plugin(RemoteFileSystem)
+        manager.register(config.host ?? 'direct', transport, { cwd: config.cwd })
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        const record = manager.ensureOffline(config.host ?? 'direct', {
+          remoteExecPort: config.remoteExecPort ?? 8765,
+          localTunnelPort: config.localTunnelPort ?? 8876,
+          token: config.token,
+          cwd: config.cwd,
+        })
+        record.state = 'error'
+        record.lastError = message
+        record.logs.push({ at: new Date().toISOString(), level: 'error', text: `seam connect failed (local execution kept): ${message}` })
+        ctx.logger?.warn?.(`[dshssh] seam connect failed, keeping local execution: ${message}`)
+      }
     }
   }
 
