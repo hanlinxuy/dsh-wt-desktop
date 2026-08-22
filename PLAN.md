@@ -5,20 +5,28 @@
 > 反向：远端 headless runtime 通过反向通道在本机（Mac）上执行操作；
 > 并且全部操作以「图形界面建议操作 / 可点击动作 / 斜杠命令」的形式暴露在 DSH GUI 中。
 
-## 0. 实施状态（2026-08-20）
+## 0. 实施状态（2026-08-22）
 
 - ✅ **Phase 0**：homelinux2 可达；远端 `codex-cli 0.147.0` 自带 `exec-server` 子命令（无需 cargo build）；端口固定（正向 8765 / 反向 18765）。
 - ✅ **Phase 1**：`runtime/` 部署源 + `scripts/` 全部就绪；已部署到 homelinux2（systemd user unit `dshssh-exec-server.service`，127.0.0.1:8765）；远端直连冒烟 + Mac→隧道→远端端到端冒烟（`uname -a` + fs 探针往返）全绿。
-- ⏳ **Phase 2**：反向脚本已写好，未冒烟 —— 需要 ① Mac 开启 Remote Login（sshd）且 homelinux2 的 key 已授权；② Mac 安装 codex（`npm i -g @openai/codex`）跑本地 exec-server。
-- ⏳ **Phase 3/4**：`dshssh` DSH 插件（host + client + GUI 建议操作）未开始。
+- ✅ **自建 runtime（去掉 codex 依赖）**：`plugin/lib/exec-server.js`（Node 单文件，ws 打包）——真实进程/fs RPC + token 认证 + allow-cwd 白名单 + SIGTERM→SIGKILL 阶梯 + spawn 错误处理；已部署 cudo。
+- ✅ **①②③ 全部完成并验证**：
+  - ① 反向执行：双隧道（Mac `ssh -R` → cudo）+ Mac 自建 exec-server，`sw_vers`→macOS 多轮验证；seam 级（远端 agent 的 bash/fs 操作 Mac）验证通过。
+  - ② 远端 DSH 同款运行时：`scripts/deploy-dsh.sh` 在 cudo 部署官方 DSH（桌面精确版本集 + cordis 别名 + 自包含插件 bundle），`dsh web` 运行于 3081，插件 API 200，seam 达到 `ready`（连上 Mac）；本地浏览器 `ssh -L 3081` 即可「本地对话框→文字给远端」。
+  - ③ GUI 建议操作：Remote Runtimes dock（输入框上方）+ `/remote` 命令 + `/api/dshssh` 状态/动作接口，已在本机 dev web（3080）上线。
+- ✅ **扩展测试（22 个 keyless 场景全绿）**：stderr/大输出截断/终止/缺命令/cwd/管道/fs 错误路径/二进制/copy/remove/token/allow-cwd；修复真实 bug：spawn 错误崩溃、单块截断失效、未处理拒绝链、缺 fsCopy。
+- ⚠️ **环境阻塞**：Mac↔cudo 公网链路丢包严重（隧道频繁掉线）；同 LAN（homelinux2 恢复后）或安装 autossh 后可稳定验证远端 agent 反向操作 Mac 的完整回合。
 
 ```text
 dshssh/
 ├─ PLAN.md
-├─ runtime/            # 部署源（codex-config 模板 / systemd units / dsh-profile）
-└─ scripts/            # deploy-remote.sh / verify-remote.sh / start-forward.sh
-                       # start-client-exec.sh / start-reverse-tunnel.sh / verify-reverse.sh
-                       # smoke-exec.mjs（exec-server 协议冒烟客户端，插件 remote_exec 的基础）
+├─ COMPARISON.md        # 生态方案对比（dsh-ssh / dsh-remote / ds-harness-remote）
+├─ runtime/            # 部署源（codex 配置模板 / systemd units / dsh-profile）
+├─ scripts/            # deploy-remote.sh / verify-remote.sh / start-forward.sh
+│                      # start-client-exec.sh / start-reverse-tunnel.sh / verify-reverse.sh
+│                      # deploy-dsh.sh（远端同款 DSH 运行时） / smoke-exec.mjs
+├─ plugin/             # 自研 @dsh-external/dshssh（seam provider + 自建 runtime + GUI）
+└─ third-party/        # 生态调研记录（dsh-ssh 定为参考模板，不集成）
 ```
 
 ---
