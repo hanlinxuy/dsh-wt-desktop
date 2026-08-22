@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "dsh-wt: seam-level SSH remote execution — ctx.subprocess / ctx.fs remote providers over codex exec-server transport (self-built, no third-party exec plugin)",
+  "description": "dsh-wt: seam-level SSH remote execution — ctx.subprocess / ctx.fs remote providers over a self-built exec-server runtime (no codex, no third-party exec plugin)",
   "main": "lib/index.js",
   "exports": {
     ".": {
@@ -13,6 +13,13 @@
     "./invariant": {
       "types": "./lib/types/invariant.d.ts",
       "default": "./lib/invariant.js"
+    },
+    "./exec-server": {
+      "types": "./lib/exec-server.d.ts",
+      "default": "./lib/exec-server.js"
+    },
+    "./client": {
+      "default": "./lib/client.js"
     },
     "./src/*": "./src/*",
     "./package.json": "./package.json"
@@ -34,6 +41,15 @@
       "patch": "./cordis.patch.yml"
     }
   },
+  "dshClient": {
+    "inject": [
+      "@deepseek-ai/dsh-client-runtime",
+      "@deepseek-ai/dsh-client-locale",
+      "@deepseek-ai/dsh-client-ui-conversation",
+      "@deepseek-ai/dsh-client-ui-slots"
+    ],
+    "platform": "web"
+  },
   "peerDependencies": {
     "@deepseek-ai/dsh-fs": "*",
     "@deepseek-ai/dsh-subprocess": "*",
@@ -41,14 +57,21 @@
     "schemastery": "^3.18.0"
   },
   "devDependencies": {
+    "@deepseek-ai/dsh-client-locale": "link:.dsh/source/current/packages/client/locale",
+    "@deepseek-ai/dsh-client-runtime": "link:.dsh/source/current/packages/client/runtime",
+    "@deepseek-ai/dsh-client-ui-conversation": "link:.dsh/source/current/packages/client/ui-conversation",
+    "@deepseek-ai/dsh-client-ui-primitives": "link:.dsh/source/current/packages/client/ui-primitives",
+    "@deepseek-ai/dsh-client-ui-slots": "link:.dsh/source/current/packages/client/ui-slots",
     "@deepseek-ai/dsh-fs": "link:.dsh/source/current/packages/fs/fs",
     "@deepseek-ai/dsh-invariants": "link:.dsh/source/current/packages/support/invariants",
     "@deepseek-ai/dsh-llm": "link:.dsh/source/current/packages/llm/llm",
     "@deepseek-ai/dsh-subprocess": "link:.dsh/source/current/packages/subprocess/subprocess",
     "@deepseek-ai/dsh-timeout": "link:.dsh/source/current/packages/util/timeout",
     "@types/node": "^24.0.0",
+    "@types/react": "~18.3.1",
     "@types/ws": "^8.18.1",
     "cordis": "link:.dsh/source/current/vendor/cordis",
+    "react": "^18.3.1",
     "schemastery": "^3.18.0",
     "tsdown": "^0.22.2",
     "typescript": "^5.9.3",

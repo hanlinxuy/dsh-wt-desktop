@@ -1,18 +1,21 @@
 /**
  * @dsh-external/dshssh — dsh-wt 自研 seam 级远程执行插件。
  *
- * 挂载后把本 profile 的 `ctx.subprocess`（和后续 `ctx.fs`）实现替换为
- * 「经 SSH 隧道 → 远端 codex exec-server（headless runtime）」的远程实现，
+ * 挂载后把本 profile 的 `ctx.subprocess` / `ctx.fs` 实现替换为
+ * 「经 SSH 隧道 → 远端自建 exec-server（headless runtime）」的远程实现，
  * 因此内置工具（bash / read / write / …）自动操作远端，工具名与参数不变。
- *
- * 部署编排（scripts/deploy-remote.sh）、反向执行、GUI 建议操作为后续版本。
+ * 同时提供 /remote 命令、/api/dshssh 状态接口与 GUI dock（client 半区）。
  * @module @dsh-external/dshssh
  */
+import { fileURLToPath } from 'node:url'
 import { Context } from 'cordis'
 import z from 'schemastery'
 import { ExecTransport } from './transport.ts'
 import { RemoteSubprocessRuntime } from './subprocess.ts'
 import { RemoteFileSystem } from './fs.ts'
+import { RemoteRuntimeManager } from './manager.ts'
+import { registerCommands } from './commands.ts'
+import { registerHttp } from './http.ts'
 
 export const name = '@dsh-external/dshssh'
 
@@ -29,6 +32,8 @@ export interface Config {
   token?: string
   /** Default remote working directory. */
   cwd: string
+  /** Mount the subprocess/fs seam providers (default true). Set false for GUI/commands-only mode. */
+  seam?: boolean
 }
 
 export const Config = z.object({
@@ -38,25 +43,41 @@ export const Config = z.object({
   url: z.string().description('直连 exec-server 的 ws:// URL（设置时跳过隧道，用于测试/已建隧道场景）'),
   token: z.string().description('exec-server 认证 token（自建 runtime 的 `?token=` 校验）'),
   cwd: z.string().default('/tmp').description('远端默认工作目录'),
+  seam: z.boolean().default(true).description('是否替换 ctx.subprocess/ctx.fs（false = 仅 GUI/命令模式）'),
 })
 
+/** Repo root (scripts/ live next to it) — resolves from the built lib/ file. */
+const SCRIPTS_ROOT = fileURLToPath(new URL('../../', import.meta.url)).replace(/\/$/, '')
+
 export async function apply(ctx: Context, config: Config): Promise<void> {
-  const transport = config.url !== undefined
-    ? await (async () => {
-        const t = new ExecTransport(config.url!, config.cwd, config.token)
-        await t.connect()
-        return t
-      })()
-    : await ExecTransport.viaTunnel(config.host!, config.remoteExecPort ?? 8765, config.localTunnelPort ?? 8876, 20000, config.cwd, config.token)
-  ctx.provide('sshTransport', transport)
-  ctx.effect(() => () => transport.close(), 'dshssh transport teardown')
-  // 挂载 subprocess 缝的远程实现（同一 context 只允许一个实现）。
-  ctx.plugin(RemoteSubprocessRuntime)
-  // 挂载 fs 缝的远程实现。
-  ctx.plugin(RemoteFileSystem)
+  // 1) runtime 管理器（GUI/命令/HTTP 共用）
+  const manager = new RemoteRuntimeManager(ctx, SCRIPTS_ROOT)
+  ctx.provide('remoteManager', manager)
+  ctx.effect(() => () => manager.dispose(), 'dshssh manager teardown')
+
+  // 2) 配置驱动的 seam 自动连接（seam !== false 且配置了 host/url 时替换本地 subprocess/fs）
+  if (config.seam !== false && (config.host !== undefined || config.url !== undefined)) {
+    const transport = config.url !== undefined
+      ? await (async () => {
+          const t = new ExecTransport(config.url!, config.cwd, config.token)
+          await t.connect()
+          return t
+        })()
+      : await ExecTransport.viaTunnel(config.host!, config.remoteExecPort ?? 8765, config.localTunnelPort ?? 8876, 20000, config.cwd, config.token)
+    ctx.provide('sshTransport', transport)
+    ctx.effect(() => () => transport.close(), 'dshssh transport teardown')
+    ctx.plugin(RemoteSubprocessRuntime)
+    ctx.plugin(RemoteFileSystem)
+    manager.register(config.host ?? 'direct', transport, { cwd: config.cwd })
+  }
+
+  // 3) /remote 命令 + /api/dshssh HTTP 接口（GUI dock 数据源）
+  registerCommands(ctx, manager)
+  registerHttp(ctx, manager)
 }
 
 export { ExecTransport } from './transport.ts'
 export { RemoteSubprocessRuntime } from './subprocess.ts'
 export { RemoteFileSystem } from './fs.ts'
+export { RemoteRuntimeManager } from './manager.ts'
 export default apply
