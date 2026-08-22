@@ -18,6 +18,7 @@ import {
   mkdirSync,
   readFileSync,
   readdirSync,
+  realpathSync,
   renameSync,
   rmSync,
   statSync,
@@ -43,6 +44,39 @@ function toAbsPath(value: unknown, allowCwd?: string): string {
       throw new Error(`path outside allow-cwd: ${abs}`)
     }
   }
+  return abs
+}
+
+/**
+ * allow-cwd 检查 + 符号链接防御：对已存在的路径取其 realpath，对不存在的
+ * 路径取父目录 realpath（写新文件场景），再验证真实目标仍在 allow-cwd 内，
+ * 防止 workspace 内 symlink 指向外部文件/目录（v1 的 toAbsPath 只查字面路径）。
+ */
+function toAbsPathSafe(value: unknown, allowCwd?: string, forWrite = false): string {
+  const abs = toAbsPath(value, allowCwd)
+  if (allowCwd === undefined) return abs
+  // 基准自身也取 realpath（macOS /tmp -> /private/tmp 等），再与目标 realpath 比较。
+  let base: string
+  try {
+    base = resolve(realpathSync(allowCwd))
+  } catch {
+    base = resolve(allowCwd)
+  }
+  const check = (target: string): void => {
+    const rel = relative(base, target)
+    if (rel === '..' || rel.startsWith(`..${sep}`)) {
+      throw new Error(`path escapes allow-cwd via symlink: ${abs} -> ${target}`)
+    }
+  }
+  let probe = abs
+  if (!existsSync(abs)) {
+    probe = forWrite ? dirname(abs) : abs
+  }
+  let real: string | undefined
+  try {
+    real = realpathSync(probe)
+  } catch { /* probe 不存在 — 字面检查已通过 */ }
+  if (real !== undefined) check(real)
   return abs
 }
 
@@ -126,12 +160,15 @@ export async function startExecServer(options: ExecServerOptions): Promise<{
             graceMs?: number
           }
           const processId = String(params.processId ?? randomUUID())
+          if (processes.has(processId)) {
+            return fail(msg['id'] as number, -32602, `duplicate processId: ${processId}`)
+          }
           const argv = Array.isArray(params.argv) ? params.argv.map(String) : []
           if (argv.length === 0 || argv[0] === undefined || argv[0].length === 0) {
             return fail(msg['id'] as number, -32602, 'argv must be non-empty')
           }
           let cwd: string
-          try { cwd = toAbsPath(params.cwd ?? process.cwd(), options.allowCwd) } catch (error) {
+          try { cwd = toAbsPathSafe(params.cwd ?? process.cwd(), options.allowCwd, false) } catch (error) {
             return fail(msg['id'] as number, -32603, error instanceof Error ? error.message : String(error))
           }
           let child: ChildProcess
@@ -228,7 +265,7 @@ export async function startExecServer(options: ExecServerOptions): Promise<{
         }
         case 'fs/readFile': {
           try {
-            const p = toAbsPath((msg['params'] as { path?: unknown }).path, options.allowCwd)
+            const p = toAbsPathSafe((msg['params'] as { path?: unknown }).path, options.allowCwd, false)
             const st = statSync(p)
             if (!st.isFile()) throw new Error(`not a regular file: ${p}`)
             return reply(msg['id'] as number, { path: pathToFileURL(p).href, dataBase64: b64(readFileSync(p)) })
@@ -239,7 +276,7 @@ export async function startExecServer(options: ExecServerOptions): Promise<{
         case 'fs/writeFile': {
           try {
             const params = msg['params'] as { path?: unknown; dataBase64?: unknown }
-            const p = toAbsPath(params.path, options.allowCwd)
+            const p = toAbsPathSafe(params.path, options.allowCwd, true)
             const content = Buffer.from(typeof params.dataBase64 === 'string' ? params.dataBase64 : '', 'base64')
             mkdirSync(dirnameOf(p), { recursive: true })
             const tmp = join(dirnameOf(p), `.dshssh-tmp-${process.pid}-${randomUUID().slice(0, 8)}`)
@@ -252,7 +289,7 @@ export async function startExecServer(options: ExecServerOptions): Promise<{
         }
         case 'fs/readDirectory': {
           try {
-            const p = toAbsPath((msg['params'] as { path?: unknown }).path, options.allowCwd)
+            const p = toAbsPathSafe((msg['params'] as { path?: unknown }).path, options.allowCwd, false)
             const entries = readdirSync(p, { withFileTypes: true }).map((entry) => ({
               name: entry.name,
               isDirectory: entry.isDirectory(),
@@ -265,7 +302,7 @@ export async function startExecServer(options: ExecServerOptions): Promise<{
         }
         case 'fs/getMetadata': {
           try {
-            const p = toAbsPath((msg['params'] as { path?: unknown }).path, options.allowCwd)
+            const p = toAbsPathSafe((msg['params'] as { path?: unknown }).path, options.allowCwd, false)
             if (!existsSync(p)) return fail(msg['id'] as number, -32603, `ENOENT: ${p}`)
             const st = statSync(p)
             return reply(msg['id'] as number, {
@@ -283,7 +320,7 @@ export async function startExecServer(options: ExecServerOptions): Promise<{
         case 'fs/remove': {
           try {
             const params = msg['params'] as { path?: unknown; recursive?: unknown }
-            const p = toAbsPath(params.path, options.allowCwd)
+            const p = toAbsPathSafe(params.path, options.allowCwd, true)
             rmSync(p, { recursive: params.recursive === true, force: true })
             return reply(msg['id'] as number, {})
           } catch (error) {
@@ -292,7 +329,7 @@ export async function startExecServer(options: ExecServerOptions): Promise<{
         }
         case 'fs/createDirectory': {
           try {
-            const p = toAbsPath((msg['params'] as { path?: unknown }).path, options.allowCwd)
+            const p = toAbsPathSafe((msg['params'] as { path?: unknown }).path, options.allowCwd, true)
             mkdirSync(p, { recursive: true })
             return reply(msg['id'] as number, {})
           } catch (error) {
@@ -301,7 +338,7 @@ export async function startExecServer(options: ExecServerOptions): Promise<{
         }
         case 'fs/canonicalize': {
           try {
-            const p = toAbsPath((msg['params'] as { path?: unknown }).path, options.allowCwd)
+            const p = toAbsPathSafe((msg['params'] as { path?: unknown }).path, options.allowCwd, false)
             if (!existsSync(p)) throw new Error(`ENOENT: ${p}`)
             return reply(msg['id'] as number, { path: p })
           } catch (error) {
@@ -311,8 +348,8 @@ export async function startExecServer(options: ExecServerOptions): Promise<{
         case 'fs/copy': {
           try {
             const params = msg['params'] as { from?: unknown; to?: unknown }
-            const from = toAbsPath(params.from, options.allowCwd)
-            const to = toAbsPath(params.to, options.allowCwd)
+            const from = toAbsPathSafe(params.from, options.allowCwd, false)
+            const to = toAbsPathSafe(params.to, options.allowCwd, true)
             copyFileSync(from, to)
             return reply(msg['id'] as number, {})
           } catch (error) {
