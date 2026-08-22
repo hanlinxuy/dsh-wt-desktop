@@ -10,10 +10,21 @@
  * framing, matching the real server).
  */
 import { spawn } from 'node:child_process'
+import {
+  realpathSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { WebSocketServer } from 'ws'
 
 function b64(text) { return Buffer.from(text, 'utf8').toString('base64') }
+function toPath(p) { return typeof p === 'string' && p.startsWith('file:') ? fileURLToPath(p) : p }
 
 /**
  * Start the mock server.
@@ -101,13 +112,55 @@ export function startMockExecServer(port = 0) {
             record.child.kill('SIGKILL')
             return reply(msg.id, { running: true })
           }
-          case 'fs/readFile':
-          case 'fs/writeFile':
-          case 'fs/readDirectory':
-          case 'fs/getMetadata':
-          case 'fs/remove':
-          case 'fs/createDirectory':
-            return error(msg.id, -32601, `mock: ${msg.method} not implemented`)
+          case 'fs/readFile': {
+            const p = toPath(msg.params.path)
+            if (!existsSync(p)) return error(msg.id, -32603, `ENOENT: ${p}`)
+            const st = statSync(p)
+            if (!st.isFile()) return error(msg.id, -32603, `EISDIR: ${p}`)
+            return reply(msg.id, { path: msg.params.path, dataBase64: b64(readFileSync(p, 'utf8')) })
+          }
+          case 'fs/writeFile': {
+            const p = toPath(msg.params.path)
+            writeFileSync(p, Buffer.from(msg.params.dataBase64 ?? '', 'base64'))
+            return reply(msg.id, { path: msg.params.path })
+          }
+          case 'fs/readDirectory': {
+            const p = toPath(msg.params.path)
+            if (!existsSync(p)) return error(msg.id, -32603, `ENOENT: ${p}`)
+            const entries = readdirSync(p, { withFileTypes: true }).map((entry) => ({
+              name: entry.name,
+              isDirectory: entry.isDirectory(),
+              fileType: entry.isDirectory() ? 'directory' : 'file',
+            }))
+            return reply(msg.id, { entries })
+          }
+          case 'fs/getMetadata': {
+            const p = toPath(msg.params.path)
+            if (!existsSync(p)) return error(msg.id, -32603, `ENOENT: ${p}`)
+            const st = statSync(p)
+            return reply(msg.id, {
+              path: msg.params.path,
+              isFile: st.isFile(),
+              isDirectory: st.isDirectory(),
+              fileType: st.isFile() ? 'file' : st.isDirectory() ? 'directory' : 'other',
+              size: st.size,
+              mtimeMs: st.mtimeMs,
+            })
+          }
+          case 'fs/remove': {
+            const p = toPath(msg.params.path)
+            rmSync(p, { recursive: msg.params.recursive === true, force: true })
+            return reply(msg.id, {})
+          }
+          case 'fs/createDirectory': {
+            mkdirSync(toPath(msg.params.path), { recursive: true })
+            return reply(msg.id, {})
+          }
+          case 'fs/canonicalize': {
+            const p = toPath(msg.params.path)
+            if (!existsSync(p)) return error(msg.id, -32603, `ENOENT: ${p}`)
+            return reply(msg.id, { path: realpathSync(p) })
+          }
           default:
             return error(msg.id, -32601, `mock: unknown method ${String(msg.method)}`)
         }

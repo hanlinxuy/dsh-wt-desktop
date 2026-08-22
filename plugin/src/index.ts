@@ -12,6 +12,7 @@ import { Context } from 'cordis'
 import z from 'schemastery'
 import { ExecTransport } from './transport.ts'
 import { RemoteSubprocessRuntime } from './subprocess.ts'
+import { RemoteFileSystem } from './fs.ts'
 
 export const name = '@dsh-external/dshssh'
 
@@ -39,17 +40,20 @@ export const Config = z.object({
 export async function apply(ctx: Context, config: Config): Promise<void> {
   const transport = config.url !== undefined
     ? await (async () => {
-        const t = new ExecTransport(config.url!)
+        const t = new ExecTransport(config.url!, config.cwd)
         await t.connect()
         return t
       })()
-    : await ExecTransport.viaTunnel(config.host!, config.remoteExecPort ?? 8765, config.localTunnelPort ?? 8876)
+    : await ExecTransport.viaTunnel(config.host!, config.remoteExecPort ?? 8765, config.localTunnelPort ?? 8876, 20000, config.cwd)
   ctx.provide('sshTransport', transport)
   ctx.effect(() => () => transport.close(), 'dshssh transport teardown')
   // 挂载 subprocess 缝的远程实现（同一 context 只允许一个实现）。
   ctx.plugin(RemoteSubprocessRuntime)
+  // 挂载 fs 缝的远程实现。
+  ctx.plugin(RemoteFileSystem)
 }
 
 export { ExecTransport } from './transport.ts'
 export { RemoteSubprocessRuntime } from './subprocess.ts'
+export { RemoteFileSystem } from './fs.ts'
 export default apply

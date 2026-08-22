@@ -24,7 +24,6 @@ import type {
   SubprocessOutputRead,
   SubprocessOutputReader,
   SubprocessSpawnSpec,
-  SubprocessTerminalSpawnSpec,
 } from '@deepseek-ai/dsh-subprocess'
 import type { Context } from 'cordis'
 import type { ExecTransport } from './transport.ts'
@@ -56,7 +55,7 @@ interface SubprocessModuleSubprocessRuntime {
   readonly ctx: Context
   resolveExecutable(command: string, env?: Readonly<Record<string, string>>, signal?: AbortSignal): Promise<string>
   spawn(spec: SubprocessSpawnSpec): SubprocessHandle
-  spawnTerminal(spec: SubprocessTerminalSpawnSpec): Promise<never>
+  spawnTerminal(spec: unknown): Promise<never>
 }
 
 const BASE_ENV: Record<string, string> = {
@@ -279,7 +278,7 @@ export class RemoteSubprocessRuntime extends SubprocessBase {
   async resolveExecutable(command: string, env?: Readonly<Record<string, string>>, signal?: AbortSignal): Promise<string> {
     if (command.length === 0) throw new Error('dshssh: executable name must be non-empty')
     signal?.throwIfAborted()
-    const transport = (this.ctx as { sshTransport: ExecTransport }).sshTransport
+    const transport = (this.ctx as unknown as { sshTransport: ExecTransport }).sshTransport
     const result = await transport.runCollect(
       ['sh', '-c', `command -v -- ${quoteShellArg(command)} || exit 127`],
       '/tmp',
@@ -294,7 +293,7 @@ export class RemoteSubprocessRuntime extends SubprocessBase {
 
   /** @inheritdoc */
   spawn(spec: SubprocessSpawnSpec): SubprocessHandle {
-    const transport = (this.ctx as { sshTransport: ExecTransport }).sshTransport
+    const transport = (this.ctx as unknown as { sshTransport: ExecTransport }).sshTransport
     const handle = new RemoteHandle(transport, spec, ++this.pidSeq)
     this.live.add(handle)
     void handle.done.finally(() => this.live.delete(handle))
@@ -302,7 +301,7 @@ export class RemoteSubprocessRuntime extends SubprocessBase {
   }
 
   /** @inheritdoc */
-  spawnTerminal(_spec: SubprocessTerminalSpawnSpec): Promise<never> {
+  spawnTerminal(_spec: unknown): Promise<never> {
     return Promise.reject(new Error('dshssh: spawnTerminal not implemented yet (v1)'))
   }
 }

@@ -71,7 +71,29 @@ try {
 
   // TODO(v2): stdin {data} 批输入 —— exec-server 无 stdin-EOF 语义，需补充协议或 mock 端处理。
 
-  console.log('SMOKE OK — ctx.subprocess runs on the remote headless runtime')
+  // 4) fs 缝：写/读/stat/edit/list 全走远端（mock 下即本机临时文件）
+  const fs = ctx.fs
+  const fsProbe = '/tmp/dshssh-fs-probe.txt'
+  const target = await fs.resolve(fsProbe)
+  const wrote = await fs.writeText(target, 'hello dshssh\n')
+  const readBack = await fs.readText(target)
+  const st = await fs.stat(target)
+  const edited = await fs.editText(target, { oldString: 'hello', newString: 'HELLO', replaceAll: false })
+  const readEdited = await fs.readText(target)
+  const listing = await fs.listDir(await fs.resolve('/tmp'))
+  console.log('fs write op  =', wrote.operation, 'version =', wrote.version)
+  console.log('fs readBack  =', JSON.stringify(readBack))
+  console.log('fs stat      =', st?.type, st?.size)
+  console.log('fs edit      =', JSON.stringify(edited.after))
+  console.log('fs list has probe =', listing.some((entry) => entry.name === 'dshssh-fs-probe.txt'))
+  if (readBack !== 'hello dshssh\n') throw new Error('fs write/read failed')
+  if (st?.type !== 'file') throw new Error('fs stat failed')
+  if (readEdited !== 'HELLO dshssh\n') throw new Error('fs edit failed')
+  if (!listing.some((entry) => entry.name === 'dshssh-fs-probe.txt')) throw new Error('fs list failed')
+  const { rmSync } = await import('node:fs')
+  rmSync(fsProbe, { force: true })
+
+  console.log('SMOKE OK — ctx.subprocess + ctx.fs run on the remote headless runtime')
 } finally {
   await fiber.dispose()
   await mock?.close()

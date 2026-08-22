@@ -11,7 +11,7 @@
  */
 import { spawn, type ChildProcess } from 'node:child_process'
 import { connect as netConnect } from 'node:net'
-import { pathToFileURL } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
 /** Minimal global WebSocket surface (Node 22 global; avoids DOM lib). */
 declare const WebSocket: {
@@ -70,6 +70,8 @@ async function waitForPort(port: number, timeoutMs: number): Promise<void> {
  */
 export class ExecTransport {
   readonly url: string
+  /** Default remote working directory for relative-path resolution. */
+  readonly cwd: string
   private ws: WebSocketClient | null = null
   private id = 0
   private pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>()
@@ -77,8 +79,9 @@ export class ExecTransport {
   private listeners = new Map<string, Set<(params: Record<string, unknown>) => void>>()
   private tunnel: ChildProcess | null = null
 
-  constructor(url: string) {
+  constructor(url: string, cwd = '/tmp') {
     this.url = url
+    this.cwd = cwd
   }
 
   /** Open an SSH local forward and return a transport targeting it. */
@@ -87,13 +90,14 @@ export class ExecTransport {
     remotePort: number,
     localPort: number,
     timeoutMs = 20000,
+    cwd = '/tmp',
   ): Promise<ExecTransport> {
     const child = spawn('ssh', [
       '-N', '-o', 'ExitOnForwardFailure=yes',
       '-o', 'ServerAliveInterval=30', '-o', 'ServerAliveCountMax=3',
       '-L', `${localPort}:127.0.0.1:${remotePort}`, host,
     ], { stdio: 'ignore' })
-    const transport = new ExecTransport(`ws://127.0.0.1:${localPort}`)
+    const transport = new ExecTransport(`ws://127.0.0.1:${localPort}`, cwd)
     transport.tunnel = child
     // Never orphan the tunnel: kill it when this process exits.
     const killTunnel = () => { try { child.kill() } catch { /* ignore */ } }
@@ -124,7 +128,7 @@ export class ExecTransport {
     })
     ws.onmessage = (ev) => this.dispatch(JSON.parse(String(ev.data)))
     await this.rpc('initialize', { clientName: '@dsh-external/dshssh' })
-    this.notify('initialized')
+    this.notify('initialized', {})
   }
 
   private dispatch(msg: Record<string, unknown>): void {
@@ -231,27 +235,49 @@ export class ExecTransport {
     await this.rpc('fs/writeFile', { path: pathToFileURL(absPath).href, dataBase64: b64encode(content) })
   }
 
-  /** fs/readDirectory → entry names. */
-  async fsListDir(absPath: string): Promise<string[]> {
+  /** fs/readDirectory → entries with name + type. */
+  async fsListDir(absPath: string): Promise<Array<{ name: string; isDirectory: boolean }>> {
     const result = await this.rpc('fs/readDirectory', { path: pathToFileURL(absPath).href })
-    const entries = (result as { entries?: Array<{ name?: string }> }).entries ?? []
-    return entries.map((entry) => entry.name ?? '').filter(Boolean)
+    const entries = (result as { entries?: Array<{ name?: string; isDirectory?: boolean; fileType?: string }> }).entries ?? []
+    return entries
+      .map((entry) => ({
+        name: entry.name ?? '',
+        isDirectory: entry.isDirectory ?? entry.fileType === 'directory',
+      }))
+      .filter((entry) => entry.name.length > 0)
   }
 
-  /** fs/getMetadata → { isFile, isDirectory, size, modifiedAt? }. */
-  async fsStat(absPath: string): Promise<{ isFile: boolean; isDirectory: boolean; size: number }> {
+  /** fs/getMetadata → { isFile, isDirectory, size, mtimeMs? }. */
+  async fsStat(absPath: string): Promise<{ isFile: boolean; isDirectory: boolean; size: number; mtimeMs?: number }> {
     const result = await this.rpc('fs/getMetadata', { path: pathToFileURL(absPath).href })
     const meta = result as {
       isFile?: boolean
       isDirectory?: boolean
       size?: number
       fileType?: string
+      modifiedAt?: string | number
+      mtimeMs?: number
+      mtime?: number
     }
+    let mtimeMs: number | undefined
+    if (typeof meta.mtimeMs === 'number') mtimeMs = meta.mtimeMs
+    else if (typeof meta.mtime === 'number') mtimeMs = meta.mtime
+    else if (typeof meta.modifiedAt === 'number') mtimeMs = meta.modifiedAt
+    else if (typeof meta.modifiedAt === 'string') mtimeMs = Date.parse(meta.modifiedAt) || undefined
     return {
       isFile: meta.isFile ?? meta.fileType === 'file',
       isDirectory: meta.isDirectory ?? meta.fileType === 'directory',
       size: meta.size ?? 0,
+      mtimeMs,
     }
+  }
+
+  /** fs/canonicalize → canonical absolute path (or throws). */
+  async fsCanonicalize(absPath: string): Promise<string> {
+    const result = await this.rpc('fs/canonicalize', { path: pathToFileURL(absPath).href })
+    const raw = (result as { path?: string }).path ?? ''
+    if (raw.startsWith('file:')) return fileURLToPath(raw)
+    return raw
   }
 
   /** fs/remove — delete a file or directory (recursive flag when supported). */
