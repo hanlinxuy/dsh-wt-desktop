@@ -1,29 +1,39 @@
 /**
  * smoke.mjs — 正向 seam 冒烟：在裸 cordis context 里挂载 @dsh-external/dshssh，
- * 通过 ctx.subprocess 调用远端（默认 homelinux2 的 codex exec-server，经 ssh -L 隧道）。
+ * 通过 ctx.subprocess / ctx.fs 调用远端 exec-server（自建 headless runtime）。
  *
  * 用法:
+ *   node test/smoke.mjs --local          # keyless：本机起真实自建 exec-server 再冒烟
+ *   node test/smoke.mjs --token          # 同上 + token 认证与白名单探针
  *   node test/smoke.mjs                  # 远端冒烟（host homelinux2, 端口 8765/8876）
- *   node test/smoke.mjs --mock           # keyless 冒烟（本地 mock exec-server）
  *   DSSH_SMOKE_URL=ws://... node test/smoke.mjs   # 直连指定 exec-server
  */
 import { Context } from 'cordis'
 import plugin from '../lib/index.js'
+import { startExecServer } from '../lib/exec-server.js'
 
 const host = process.env.DSSH_SMOKE_HOST ?? 'homelinux2'
 const remoteExecPort = Number(process.env.DSSH_SMOKE_REMOTE_PORT ?? 8765)
 const localTunnelPort = Number(process.env.DSSH_SMOKE_LOCAL_PORT ?? 8876)
 
-const useMock = process.argv.includes('--mock')
-let mock
-if (useMock) {
-  const { startMockExecServer } = await import('./mock-exec-server.mjs')
-  mock = await startMockExecServer(0)
-  console.log(`mock exec-server at ${mock.url}`)
+const useLocal = process.argv.includes('--local')
+const useToken = process.argv.includes('--token')
+let server
+let token
+
+if (useLocal) {
+  token = useToken ? 'dshssh-test-token' : undefined
+  server = await startExecServer({
+    listen: 'ws://127.0.0.1:0',
+    token,
+    allowCwd: '/tmp',
+    graceMs: 2000,
+  })
+  console.log(`self-built exec-server at ${server.url}${token !== undefined ? ' (token-auth)' : ''}`)
 }
 
-const config = process.env.DSSH_SMOKE_URL ?? mock?.url
-  ? { url: process.env.DSSH_SMOKE_URL ?? mock.url, cwd: '/tmp' }
+const config = process.env.DSSH_SMOKE_URL ?? server?.url
+  ? { url: process.env.DSSH_SMOKE_URL ?? server.url, cwd: '/tmp', ...(token !== undefined ? { token } : {}) }
   : { host, remoteExecPort, localTunnelPort, cwd: '/tmp' }
 
 const ctx = new Context()
@@ -94,7 +104,20 @@ try {
   rmSync(fsProbe, { force: true })
 
   console.log('SMOKE OK — ctx.subprocess + ctx.fs run on the remote headless runtime')
+
+  // 5) token 认证（--token 模式）：无 token 连接必须失败（竞速探测，兼容 undici 关闭语义）
+  if (useToken) {
+    const { ExecTransport } = await import('../lib/index.js')
+    const bad = new ExecTransport(server.url, '/tmp')
+    const outcome = await Promise.race([
+      bad.connect().then(() => 'connected', () => 'rejected'),
+      new Promise((resolve) => setTimeout(() => resolve('timeout'), 8000)),
+    ])
+    console.log(`token probe: unauthorized -> ${outcome}`)
+    if (outcome === 'connected') throw new Error('token probe failed: unauthorized connect succeeded')
+    bad.close()
+  }
 } finally {
   await fiber.dispose()
-  await mock?.close()
+  await server?.close()
 }

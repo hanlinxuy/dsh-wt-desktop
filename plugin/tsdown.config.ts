@@ -17,4 +17,16 @@ export default [
     dts: true,
     clean: true,
   },
+  {
+    // 自建 headless runtime：单文件产物（ws 已打包），部署到目标机只需 Node。
+    entry: { 'exec-server': 'src/exec-server.ts' },
+    outDir: 'lib',
+    format: ['esm'],
+    platform: 'node',
+    target: 'es2024',
+    fixedExtension: false,
+    dts: true,
+    clean: false,
+    noExternal: ['ws'],
+  },
 ] satisfies UserConfig[]

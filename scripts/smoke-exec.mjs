@@ -26,7 +26,7 @@ function usage() {
 }
 
 function parseArgs(argv) {
-  const opts = { url: DEFAULT_URL, cwd: null, fsWrite: null, timeoutMs: 30000 }
+  const opts = { url: DEFAULT_URL, cwd: null, fsWrite: null, timeoutMs: 30000, token: null }
   let i = 0
   while (i < argv.length) {
     const a = argv[i]
@@ -35,6 +35,7 @@ function parseArgs(argv) {
     if (a === '--cwd') { opts.cwd = argv[++i]; i++; continue }
     if (a === '--fs-write') { opts.fsWrite = argv[++i]; i++; continue }
     if (a === '--timeout-ms') { opts.timeoutMs = Number(argv[++i]); i++; continue }
+    if (a === '--token') { opts.token = argv[++i]; i++; continue }
     console.error(`smoke-exec: unknown option ${a}`); usage(); process.exit(2)
   }
   opts.argv = []
@@ -134,7 +135,8 @@ async function main() {
   const cwdUrl = opts.cwd ? pathToFileURL(opts.cwd).href : pathToFileURL(process.env.HOME || '/tmp').href
   const env = { PATH: '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin', HOME: opts.cwd || process.env.HOME || '/tmp' }
 
-  const client = new ExecServerClient(opts.url, opts.timeoutMs)
+  const url = opts.token ? `${opts.url}${opts.url.includes('?') ? '&' : '?'}token=${encodeURIComponent(opts.token)}` : opts.url
+  const client = new ExecServerClient(url, opts.timeoutMs)
   let exitCode = 0
   try {
     await client.connect()

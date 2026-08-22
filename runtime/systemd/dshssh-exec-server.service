@@ -1,15 +1,15 @@
 [Unit]
-Description=dshssh codex exec-server (remote process/fs backend over WebSocket)
+Description=dshssh exec-server (self-built headless runtime: process/fs RPC over WebSocket)
 Wants=network-online.target
 After=network-online.target
 
 [Service]
 Type=simple
-Environment=PATH=__CODEX_DIR__:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-# codex exec-server is a subcommand of the codex CLI (>= 0.147). It exposes
-# process/* and fs/* JSON-RPC over ws://127.0.0.1:__EXEC_PORT__. Loopback-only:
-# access is always via an SSH local/remote forward from a trusted client.
-ExecStart=__CODEX_BIN__ exec-server --listen ws://127.0.0.1:__EXEC_PORT__ --concurrent-requests 4
+# Self-built Node runtime (plugin/lib/exec-server.js, ws bundled — the target only
+# needs Node). Token read from ~/.config/dshssh/token (0600, generated at deploy).
+# allow-cwd restricts process cwd + fs paths to the trusted workspace.
+Environment=PATH=__NODE_DIR__:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=__NODE_BIN__ __REMOTE_BASE__/runtime/exec-server.js --listen ws://127.0.0.1:__EXEC_PORT__ --token-file %h/.config/dshssh/token --allow-cwd %h/workspaces/dshssh
 Restart=on-failure
 RestartSec=3
 UMask=0077

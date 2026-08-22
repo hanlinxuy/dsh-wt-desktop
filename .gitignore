@@ -17,6 +17,7 @@ profiles/*/pnpm-lock.yaml
 known_hosts*
 *.pem
 *.key
+.runtime-tokens/
 
 # logs & scratch
 *.log

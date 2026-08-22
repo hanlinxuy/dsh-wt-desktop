@@ -79,8 +79,8 @@ export class ExecTransport {
   private listeners = new Map<string, Set<(params: Record<string, unknown>) => void>>()
   private tunnel: ChildProcess | null = null
 
-  constructor(url: string, cwd = '/tmp') {
-    this.url = url
+  constructor(url: string, cwd = '/tmp', token?: string) {
+    this.url = token === undefined || token.length === 0 ? url : `${url}${url.includes('?') ? '&' : '?'}token=${encodeURIComponent(token)}`
     this.cwd = cwd
   }
 
@@ -91,13 +91,14 @@ export class ExecTransport {
     localPort: number,
     timeoutMs = 20000,
     cwd = '/tmp',
+    token?: string,
   ): Promise<ExecTransport> {
     const child = spawn('ssh', [
       '-N', '-o', 'ExitOnForwardFailure=yes',
       '-o', 'ServerAliveInterval=30', '-o', 'ServerAliveCountMax=3',
       '-L', `${localPort}:127.0.0.1:${remotePort}`, host,
     ], { stdio: 'ignore' })
-    const transport = new ExecTransport(`ws://127.0.0.1:${localPort}`, cwd)
+    const transport = new ExecTransport(`ws://127.0.0.1:${localPort}`, cwd, token)
     transport.tunnel = child
     // Never orphan the tunnel: kill it when this process exits.
     const killTunnel = () => { try { child.kill() } catch { /* ignore */ } }
