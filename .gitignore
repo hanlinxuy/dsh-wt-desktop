@@ -1,0 +1,28 @@
+# deps / build outputs
+node_modules/
+lib/
+dist/
+*.tsbuildinfo
+.pnpm-store/
+
+# dsh state & profiles
+.dsh/
+profiles/*/node_modules/
+profiles/*/pnpm-lock.yaml
+
+# secrets & local config — never commit
+.env
+.env.*
+*.dshssh-bak*
+known_hosts*
+*.pem
+*.key
+
+# logs & scratch
+*.log
+/tmp-*
+probe-*
+
+# OS
+.DS_Store
+Thumbs.db

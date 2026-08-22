@@ -1,0 +1,28 @@
+# dshssh managed — remote codex config (EXAMPLE)
+#
+# deploy-remote.sh backs up any existing ~/.codex/config.toml, then appends a
+# small `# === dshssh managed ===` section (trusted projects only, so it never
+# duplicates existing TOML tables). This file documents the shape a fresh
+# runtime should get; real values live on the target at ~/.codex/config.toml.
+#
+# NOTE: approval_policy = "never" is ONLY acceptable for isolated, trusted,
+# low-privilege runtimes. Do not copy this to a host you do not fully control.
+
+# Model used by agent-mode codex runs on this host (ignored by exec-server,
+# which only exposes process/fs RPC).
+model = "deepseek-v4-flash"
+
+# Agent runs on this host answer their own approvals (headless).
+approval_policy = "never"
+
+# Filesystem mutations limited to the trusted workspace; network denied by
+# default (override per-project or per-run when explicitly needed).
+sandbox_mode = "workspace-write"
+
+[sandbox_workspace_write]
+network_access = false
+
+# Workspaces the headless runtime is allowed to touch. Deploy adds
+# ~/workspaces/dshssh automatically; add your own below.
+[projects."/home/USER/workspaces/dshssh"]
+trust_level = "trusted"

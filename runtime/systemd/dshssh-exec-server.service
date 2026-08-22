@@ -1,0 +1,18 @@
+[Unit]
+Description=dshssh codex exec-server (remote process/fs backend over WebSocket)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+Environment=PATH=__CODEX_DIR__:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+# codex exec-server is a subcommand of the codex CLI (>= 0.147). It exposes
+# process/* and fs/* JSON-RPC over ws://127.0.0.1:__EXEC_PORT__. Loopback-only:
+# access is always via an SSH local/remote forward from a trusted client.
+ExecStart=__CODEX_BIN__ exec-server --listen ws://127.0.0.1:__EXEC_PORT__ --concurrent-requests 4
+Restart=on-failure
+RestartSec=3
+UMask=0077
+
+[Install]
+WantedBy=default.target

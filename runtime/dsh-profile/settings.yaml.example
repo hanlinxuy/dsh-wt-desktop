@@ -1,0 +1,5 @@
+# Remote DSH profile settings (EXAMPLE) — installs to DSH_HOME/settings.yaml.
+# The headless DSH Web runtime on the target uses this default agent route.
+agent-default-model:
+  provider: deepseek-official
+  model: deepseek-v4-flash

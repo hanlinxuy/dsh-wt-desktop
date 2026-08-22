@@ -1,0 +1,24 @@
+# Reference: existing DSH Web headless runtime (homelinux2, informational).
+# deploy-remote.sh does NOT touch this unit; it only installs the dshssh
+# exec-server unit. This file documents how the DSH Web runtime is launched so
+# new targets can reproduce it.
+#
+# Install: ~/.config/systemd/user/dsh-rsi.service
+[Unit]
+Description=DeepSeek Harness RSI Web with official Codex subagent
+Wants=network-online.target mihomo-dsh.service
+After=network-online.target mihomo-dsh.service
+
+[Service]
+Type=simple
+WorkingDirectory=/home/USER
+Environment=DSH_HOME=/home/USER/.local/share/dsh-rsi/home
+Environment=DSH_TELEMETRY_DISABLED=1
+Environment=PATH=/home/USER/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/home/USER/.local/bin/node /home/USER/.local/share/dsh-rsi/runtime/node_modules/@deepseek-ai/dsh/lib/bin.js web --host 127.0.0.1 --port 3081
+Restart=on-failure
+RestartSec=5
+UMask=0077
+
+[Install]
+WantedBy=default.target
