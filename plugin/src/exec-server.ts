@@ -380,6 +380,8 @@ export async function startExecServer(options: ExecServerOptions): Promise<{
         if (!record.exited) { record.child.kill('SIGKILL') }
       }
       processes.clear()
+      // 强制断开所有客户端连接，否则 wss.close() 会等它们自己断开而挂起。
+      for (const client of wss.clients) client.terminate()
       wss.close(() => resolveClose())
     }),
   }

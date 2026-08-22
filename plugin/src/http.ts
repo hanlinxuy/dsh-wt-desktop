@@ -1,8 +1,12 @@
 /**
- * /api/dshssh — JSON state + action endpoints consumed by the GUI dock.
- * GET  /api/dshssh/state   -> { hosts: [{name,state,lastError,logs:[...]}] }
- * POST /api/dshssh/action  -> { host, action: connect|disconnect|smoke|deploy|verify }
+ * /api/dshssh — JSON state/action + 远端文件浏览/预览/下载端点。
+ * GET  /api/dshssh/state    -> { hosts: [{name,state,lastError,logs:[...]}] }
+ * POST /api/dshssh/action   -> { host, action: connect|disconnect|smoke|deploy|verify }
+ * GET  /api/dshssh/fs/list  ?host=&path=  -> { path, entries: [{name,type,size}] }
+ * GET  /api/dshssh/fs/read  ?host=&path=  -> { path, content, truncated }
+ * GET  /api/dshssh/fs/download ?host=&path= -> raw bytes (attachment)
  *
+ * 安全：路径边界由远端自建 exec-server 的 allow-cwd 强制（本端只是代理）。
  * Registers on whichever HTTP carrier exists: `webServer` (dsh-my-rsi/upstream)
  * or `httpServer` (desktop). Uses a scoped `ctx.inject` so the route appears
  * once the carrier loads, regardless of loader entry order; in bare test
@@ -10,13 +14,16 @@
  * @module @dsh-external/dshssh/http
  */
 import type { Context } from 'cordis'
+import { basename } from 'node:path'
 import type { RemoteRuntimeManager } from './manager.ts'
 
 interface HttpHandler {
   register(opts: { kind: 'prefix'; path: string; handler: (req: unknown, res: unknown) => void }): unknown
 }
 interface HttpReq { url?: string; method?: string; on?(event: 'data' | 'end', cb: (chunk?: Buffer) => void): void }
-interface HttpRes { writeHead(code: number, headers?: Record<string, string>): void; end(body: string): void }
+interface HttpRes { writeHead(code: number, headers?: Record<string, string>): void; end(body: string | Buffer): void }
+
+const READ_CAP = 512 * 1024 // fs/read 预览上限
 
 export function registerHttp(ctx: Context, manager: RemoteRuntimeManager): void {
   const registerOn = (server: HttpHandler): void => {
@@ -67,6 +74,43 @@ export function registerHttp(ctx: Context, manager: RemoteRuntimeManager): void 
             }
             send(res, 400, { ok: false, error: `unknown action ${String(action)}` })
           })
+          return
+        }
+        // ---- 远端文件浏览 / 预览 / 下载 ----
+        if (req.method === 'GET' && url.pathname.startsWith('/api/dshssh/fs/')) {
+          const host = url.searchParams.get('host')
+          const path = url.searchParams.get('path') ?? '/'
+          const transport = manager.transportFor(host)
+          if (transport === null) {
+            send(res, 409, { error: 'no ready runtime transport — 先连接一个 host' })
+            return
+          }
+          const route = url.pathname.slice('/api/dshssh/fs/'.length)
+          if (route === 'list') {
+            void transport.fsListDir(path).then((entries) => {
+              send(res, 200, { path, entries: entries.map((e) => ({ name: e.name, type: e.isDirectory ? 'directory' : 'file' })) })
+            }).catch((error: unknown) => send(res, 500, { error: error instanceof Error ? error.message : String(error) }))
+            return
+          }
+          if (route === 'read') {
+            void transport.fsReadBytes(path).then((bytes) => {
+              const truncated = bytes.length > READ_CAP
+              send(res, 200, { path, truncated, content: bytes.subarray(0, READ_CAP).toString('utf8') })
+            }).catch((error: unknown) => send(res, 500, { error: error instanceof Error ? error.message : String(error) }))
+            return
+          }
+          if (route === 'download') {
+            void transport.fsReadBytes(path).then((bytes) => {
+              res.writeHead(200, {
+                'content-type': 'application/octet-stream',
+                'content-disposition': `attachment; filename="${basename(path).replaceAll('"', '')}"`,
+                'content-length': String(bytes.length),
+              })
+              res.end(bytes)
+            }).catch((error: unknown) => send(res, 500, { error: error instanceof Error ? error.message : String(error) }))
+            return
+          }
+          send(res, 404, { error: `unknown fs route ${route}` })
           return
         }
         send(res, 404, { error: 'not found' })

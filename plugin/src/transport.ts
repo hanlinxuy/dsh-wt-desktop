@@ -236,6 +236,13 @@ export class ExecTransport {
     return b64decode(raw ?? '')
   }
 
+  /** fs/readFile → raw bytes (binary-safe, for downloads). */
+  async fsReadBytes(absPath: string): Promise<Buffer> {
+    const result = await this.rpc('fs/readFile', { path: pathToFileURL(absPath).href })
+    const raw = (result as { dataBase64?: string; data?: string }).dataBase64 ?? (result as { data?: string }).data
+    return Buffer.from(raw ?? '', 'base64')
+  }
+
   /** fs/writeFile (atomic-ish; exec-server writes through its fs layer). */
   async fsWriteText(absPath: string, content: string): Promise<void> {
     await this.rpc('fs/writeFile', { path: pathToFileURL(absPath).href, dataBase64: b64encode(content) })

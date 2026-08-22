@@ -9,6 +9,11 @@ export type DockKey =
   | 'disconnect'
   | 'logs'
   | 'busy'
+  | 'files'
+  | 'emptyDir'
+  | 'truncated'
+  | 'download'
+  | 'view'
 
 export const zh: Record<DockKey, string> = {
   title: 'Remote Runtimes',
@@ -20,6 +25,11 @@ export const zh: Record<DockKey, string> = {
   disconnect: '断开',
   logs: '日志',
   busy: '执行中…',
+  files: '文件',
+  emptyDir: '（空目录）',
+  truncated: '（已截断预览，点 ⤓ 下载完整文件）',
+  download: '下载',
+  view: '查看',
 }
 
 export const en: Record<DockKey, string> = {
@@ -32,4 +42,9 @@ export const en: Record<DockKey, string> = {
   disconnect: 'Disconnect',
   logs: 'Logs',
   busy: 'Running…',
+  files: 'Files',
+  emptyDir: '(empty)',
+  truncated: '(truncated preview — ⤓ to download full file)',
+  download: 'Download',
+  view: 'View',
 }

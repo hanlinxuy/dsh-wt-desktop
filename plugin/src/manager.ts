@@ -57,6 +57,23 @@ export class RemoteRuntimeManager {
     return record
   }
 
+  /** First ready transport (for fs browsing/downloads when no host is specified). */
+  defaultTransport(): ExecTransport | null {
+    for (const record of this.hosts.values()) {
+      if (record.state === 'ready' && record.transport !== null) return record.transport
+    }
+    return null
+  }
+
+  /** Resolve a transport for a named host, falling back to the first ready one. */
+  transportFor(name: string | null): ExecTransport | null {
+    if (name !== null) {
+      const record = this.hosts.get(name)
+      if (record?.state === 'ready' && record.transport !== null) return record.transport
+    }
+    return this.defaultTransport()
+  }
+
   /** Register a configured host as offline (GUI-only mode): visible in the dock, connect on demand. */
   ensureOffline(name: string, options: { cwd?: string; remoteExecPort?: number; localTunnelPort?: number; token?: string } = {}): ManagedHost {
     const existing = this.hosts.get(name)
