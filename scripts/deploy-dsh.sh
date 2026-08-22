@@ -21,6 +21,12 @@ REMOTE_HOME="$(remote_sh "$HOST" 'printf %s "$HOME"')"
 
 dshssh_log "deploying DSH $DSH_VERSION web runtime to $HOST (port $WEB_PORT)"
 
+# --- 0) 同步插件源码到远端（file: 安装需要 package.json + lib） ---
+remote_sh "$HOST" "mkdir -p \$HOME/$REMOTE_BASE/plugin"
+rsync -az --exclude node_modules --exclude .dsh --exclude src --exclude test \
+  "$DSHSSH_ROOT/plugin/" "$HOST:$REMOTE_BASE/plugin/"
+dshssh_log "plugin synced to ~/$REMOTE_BASE/plugin"
+
 # --- 1) 远端 DSH profile（独立 home，与本地版本一致） ------------------------
 DSH_HOME_REMOTE="$REMOTE_HOME/.dsh-wt/home"
 PROF_REMOTE="$DSH_HOME_REMOTE/profiles/web"

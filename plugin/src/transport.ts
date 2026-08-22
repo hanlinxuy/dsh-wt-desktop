@@ -112,7 +112,12 @@ export class ExecTransport {
       child.kill()
       throw error
     }
-    await transport.connect(timeoutMs)
+    try {
+      await transport.connect(timeoutMs)
+    } catch (error) {
+      transport.close()
+      throw error
+    }
     return transport
   }
 

@@ -78,14 +78,20 @@ export class RemoteRuntimeManager {
   /** Connect one host: spawn ssh -L + handshake with the remote exec-server. */
   async connect(host: string, options: { remoteExecPort?: number; localTunnelPort?: number; token?: string; cwd?: string } = {}): Promise<ManagedHost> {
     const existing = this.hosts.get(host)
+    const merged = {
+      remoteExecPort: options.remoteExecPort ?? existing?.remoteExecPort ?? 8765,
+      localTunnelPort: options.localTunnelPort ?? existing?.localTunnelPort ?? 8876,
+      token: options.token ?? existing?.token,
+      cwd: options.cwd ?? existing?.cwd ?? '/tmp',
+    }
     if (existing?.state === 'ready' && existing.transport !== null) return existing
     const record: ManagedHost = {
       name: host,
       state: 'connecting',
-      remoteExecPort: options.remoteExecPort ?? 8765,
-      localTunnelPort: options.localTunnelPort ?? 8876,
-      token: options.token,
-      cwd: options.cwd ?? '/tmp',
+      remoteExecPort: merged.remoteExecPort,
+      localTunnelPort: merged.localTunnelPort,
+      token: merged.token,
+      cwd: merged.cwd,
       transport: null,
       logs: existing?.logs ?? [],
     }
@@ -132,14 +138,14 @@ export class RemoteRuntimeManager {
     this.log(record, 'info', `running scripts/${script} ${host}`)
     return new Promise<number>((resolve) => {
       const child = spawn('bash', [this.scriptsRoot + `/scripts/${script}`, host], { stdio: ['ignore', 'pipe', 'pipe'] })
-      const push = (level: 'info' | 'ok' | 'error', chunk: Buffer) => {
+      const push = (level: 'info' | 'error', chunk: Buffer) => {
         for (const line of chunk.toString('utf8').split('\n')) {
           const trimmed = line.trim()
           if (trimmed.length > 0) this.log(record, level, trimmed)
         }
       }
       child.stdout.on('data', (d: Buffer) => push('info', d))
-      child.stderr.on('data', (d: Buffer) => push('error', d))
+      child.stderr.on('data', (d: Buffer) => push('info', d))
       child.on('close', (code) => {
         this.log(record, code === 0 ? 'ok' : 'error', `${kind} finished (exit ${String(code)})`)
         if (record.state === 'connecting') record.state = code === 0 ? 'ready' : 'error'
