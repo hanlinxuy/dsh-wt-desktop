@@ -1,3 +1,3 @@
-- insert:
-    - id: dshssh
-      name: '@dsh-external/dshssh'
+# dshssh plugin 不自行挂载：由 profile 的 cordis.patch.yml 统一插入并配置
+# （避免重复 loader 条目）。
+[]
