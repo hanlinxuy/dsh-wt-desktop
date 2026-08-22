@@ -24,11 +24,24 @@ if [ -z "$NODE_BIN" ]; then
   ARCH="${ARCH/x86_64/x64}"
   [ "$ARCH" = "aarch64" ] && ARCH="arm64"
   NODE_TARBALL="node-v22.19.0-linux-${ARCH}.tar.xz"
-  remote_sh "$HOST" "mkdir -p \$HOME/.local && cd /tmp && \
-    (command -v wget >/dev/null && wget -q https://nodejs.org/dist/v22.19.0/$NODE_TARBALL || curl -fsSLO https://nodejs.org/dist/v22.19.0/$NODE_TARBALL) && \
-    tar -xJf $NODE_TARBALL -C \$HOME/.local --strip-components=1 && rm -f $NODE_TARBALL"
+  if remote_sh "$HOST" 'command -v wget >/dev/null || command -v curl >/dev/null'; then
+    remote_sh "$HOST" "mkdir -p \$HOME/.local && cd /tmp && \
+      (command -v wget >/dev/null && wget -q https://nodejs.org/dist/v22.19.0/$NODE_TARBALL || curl -fsSLO https://nodejs.org/dist/v22.19.0/$NODE_TARBALL) && \
+      tar -xJf $NODE_TARBALL -C \$HOME/.local --strip-components=1 && rm -f $NODE_TARBALL"
+  else
+    dshssh_log "target lacks wget/curl — downloading locally and scp'ing"
+    TMP_TGZ="$(mktemp -d)/$NODE_TARBALL"
+    curl -fsSLO "https://nodejs.org/dist/v22.19.0/$NODE_TARBALL" --output-dir "$(dirname "$TMP_TGZ")" 2>/dev/null \
+      || curl -fsSL "https://nodejs.org/dist/v22.19.0/$NODE_TARBALL" -o "$TMP_TGZ"
+    scp "${SSH_OPTS[@]}" "$TMP_TGZ" "$HOST:/tmp/$NODE_TARBALL"
+    rm -rf "$(dirname "$TMP_TGZ")"
+    remote_sh "$HOST" "mkdir -p \$HOME/.local && tar -xJf /tmp/$NODE_TARBALL -C \$HOME/.local --strip-components=1 && rm -f /tmp/$NODE_TARBALL"
+  fi
   NODE_BIN="\$HOME/.local/bin/node"
 fi
+# systemd does not expand $HOME — substitute the real remote home.
+REMOTE_HOME="$(remote_sh "$HOST" 'printf %s "$HOME"')"
+NODE_BIN="${NODE_BIN//\$HOME/$REMOTE_HOME}"
 NODE_DIR="$(dirname "$NODE_BIN")"
 dshssh_log "node: $NODE_BIN"
 

@@ -30,14 +30,14 @@ remote_sh() {
 resolve_codex_bin() {
   local host="$1"
   remote_sh "$host" 'command -v codex 2>/dev/null || { test -x "$HOME/.local/bin/codex" && echo "$HOME/.local/bin/codex"; }' \
-    | tail -1
+    | tail -1 || true
 }
 
 # resolve_node_bin HOST — absolute path of `node` on the target (for smoke runs).
 resolve_node_bin() {
   local host="$1"
   remote_sh "$host" 'command -v node 2>/dev/null || { test -x "$HOME/.local/bin/node" && echo "$HOME/.local/bin/node"; }' \
-    | tail -1
+    | tail -1 || true
 }
 
 # start_tunnel HOST LOCAL_PORT REMOTE_PORT [EXTRA_SSH_OPTS...] — autossh

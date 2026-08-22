@@ -15,6 +15,8 @@ import { startExecServer } from '../lib/exec-server.js'
 const host = process.env.DSSH_SMOKE_HOST ?? 'homelinux2'
 const remoteExecPort = Number(process.env.DSSH_SMOKE_REMOTE_PORT ?? 8765)
 const localTunnelPort = Number(process.env.DSSH_SMOKE_LOCAL_PORT ?? 8876)
+const remoteToken = process.env.DSSH_SMOKE_TOKEN
+const smokeCwd = process.env.DSSH_SMOKE_CWD ?? '/tmp'
 
 const useLocal = process.argv.includes('--local')
 const useToken = process.argv.includes('--token')
@@ -33,8 +35,8 @@ if (useLocal) {
 }
 
 const config = process.env.DSSH_SMOKE_URL ?? server?.url
-  ? { url: process.env.DSSH_SMOKE_URL ?? server.url, cwd: '/tmp', ...(token !== undefined ? { token } : {}) }
-  : { host, remoteExecPort, localTunnelPort, cwd: '/tmp' }
+  ? { url: process.env.DSSH_SMOKE_URL ?? server.url, cwd: smokeCwd, ...(token !== undefined ? { token } : {}) }
+  : { host, remoteExecPort, localTunnelPort, cwd: smokeCwd, ...(remoteToken !== undefined ? { token: remoteToken } : {}) }
 
 const ctx = new Context()
 const fiber = ctx.plugin(plugin, config)
@@ -45,7 +47,7 @@ try {
   // 1) uname -a 走远端
   const handle = sub.spawn({
     argv: ['uname', '-a'],
-    cwd: '/tmp',
+    cwd: smokeCwd,
     stdio: { stdin: 'ignore', stdout: { maxBytes: 65536 }, stderr: { maxBytes: 65536 } },
     graceMs: 5000,
   })
@@ -58,7 +60,7 @@ try {
   // 2) env 透传 + shell 执行
   const handle2 = sub.spawn({
     argv: ['sh', '-c', 'echo "probe-$DSSH_PROBE"'],
-    cwd: '/tmp',
+    cwd: smokeCwd,
     stdio: { stdin: 'ignore', stdout: { maxBytes: 4096 }, stderr: { maxBytes: 4096 } },
     graceMs: 5000,
     env: { DSSH_PROBE: 'ok' },
@@ -71,7 +73,7 @@ try {
   // 3) 退出码非零探针（远端返回 7）
   const handle3 = sub.spawn({
     argv: ['sh', '-c', 'exit 7'],
-    cwd: '/tmp',
+    cwd: smokeCwd,
     stdio: { stdin: 'ignore', stdout: { maxBytes: 4096 }, stderr: { maxBytes: 4096 } },
     graceMs: 5000,
   })
@@ -83,14 +85,14 @@ try {
 
   // 4) fs 缝：写/读/stat/edit/list 全走远端（mock 下即本机临时文件）
   const fs = ctx.fs
-  const fsProbe = '/tmp/dshssh-fs-probe.txt'
+  const fsProbe = smokeCwd + '/dshssh-fs-probe.txt'
   const target = await fs.resolve(fsProbe)
   const wrote = await fs.writeText(target, 'hello dshssh\n')
   const readBack = await fs.readText(target)
   const st = await fs.stat(target)
   const edited = await fs.editText(target, { oldString: 'hello', newString: 'HELLO', replaceAll: false })
   const readEdited = await fs.readText(target)
-  const listing = await fs.listDir(await fs.resolve('/tmp'))
+  const listing = await fs.listDir(await fs.resolve(smokeCwd))
   console.log('fs write op  =', wrote.operation, 'version =', wrote.version)
   console.log('fs readBack  =', JSON.stringify(readBack))
   console.log('fs stat      =', st?.type, st?.size)
