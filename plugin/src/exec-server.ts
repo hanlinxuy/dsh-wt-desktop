@@ -52,6 +52,7 @@ interface ManagedProcess {
   nextSeq: number
   exited: boolean
   exitCode: number | null
+  failure?: string
   stdinClosed: boolean
   graceMs: number
   killTimer: NodeJS.Timeout | null
@@ -167,6 +168,16 @@ export async function startExecServer(options: ExecServerOptions): Promise<{
             record.exitCode = code
             if (record.killTimer !== null) clearTimeout(record.killTimer)
             notify('process/exited', { processId, seq: ++record.nextSeq, exitCode: code, sandboxDenied: false })
+            notify('process/closed', { processId, seq: ++record.nextSeq })
+          })
+          // Spawn-level failure (ENOENT etc.) must not crash the server — report
+          // an exited-with-failure so the client can reject `done`.
+          child.on('error', (error: Error) => {
+            record.exited = true
+            record.exitCode = null
+            record.failure = error.message
+            if (record.killTimer !== null) clearTimeout(record.killTimer)
+            notify('process/exited', { processId, seq: ++record.nextSeq, exitCode: null, failure: error.message, sandboxDenied: false })
             notify('process/closed', { processId, seq: ++record.nextSeq })
           })
           return reply(msg['id'] as number, { processId })

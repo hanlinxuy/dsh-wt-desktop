@@ -82,11 +82,23 @@ class StreamBuffer {
     this.chunks.push({ start: this.end, text })
     this.end += Buffer.byteLength(text)
     this.total += Buffer.byteLength(text)
-    // Drop from the head while over cap (keep the TAIL).
-    while (this.end - this.retainedStart > maxBytes && this.chunks.length > 1) {
-      const head = this.chunks[0]
-      this.chunks.shift()
-      this.retainedStart = head.start + Buffer.byteLength(head.text)
+    // Drop from the head while over cap (keep the TAIL) — including within a
+    // single oversized chunk.
+    while (this.end - this.retainedStart > maxBytes && this.chunks.length > 0) {
+      const head = this.chunks[0]!
+      const headLen = Buffer.byteLength(head.text)
+      const over = this.end - this.retainedStart - maxBytes
+      if (headLen <= over) {
+        this.chunks.shift()
+        this.retainedStart += headLen
+      } else {
+        // Trim part of the head chunk (ASCII-safe slice; multibyte boundary
+        // lossyness is acceptable for a tail window).
+        const drop = Math.min(headLen, over)
+        head.text = head.text.slice(drop)
+        head.start += drop
+        this.retainedStart += drop
+      }
     }
   }
 
@@ -178,6 +190,7 @@ class RemoteHandle implements SubprocessHandle {
     const offExit = transport.on('process/exited', (params) => {
       if (params['processId'] !== this.processId) return
       const exitCode = typeof params['exitCode'] === 'number' ? params['exitCode'] : null
+      const spawnFailure = typeof params['failure'] === 'string' ? params['failure'] : undefined
       // Final drain of server-buffered output NOT already delivered as notifications.
       transport.readProcess(this.processId, lastSeq, 1 << 20, 200).then((drain) => {
         for (const chunk of drain.chunks ?? []) {
@@ -194,18 +207,28 @@ class RemoteHandle implements SubprocessHandle {
         offOutput(); offExit()
         this.stdoutPass?.end()
         this.stderrPass?.end()
-        resolveOutcome({ exitCode, signal: null })
+        if (spawnFailure !== undefined) {
+          rejectOutcome(new Error(`remote spawn failed: ${spawnFailure}`))
+        } else {
+          resolveOutcome({ exitCode, signal: null })
+        }
       }).catch((error: unknown) => {
         offOutput(); offExit()
         this.stdoutPass?.end()
         this.stderrPass?.end()
-        resolveOutcome({ exitCode, signal: null })
+        if (spawnFailure !== undefined) {
+          rejectOutcome(new Error(`remote spawn failed: ${spawnFailure}`))
+        } else {
+          resolveOutcome({ exitCode, signal: null })
+        }
       })
     })
 
     let resolveOutcome!: (outcome: SubprocessOutcome) => void
+    let rejectOutcome!: (error: Error) => void
     this.done = new Promise<SubprocessOutcome>((resolve, reject) => {
       resolveOutcome = resolve
+      rejectOutcome = reject
       transport.startProcess(this.processId, spec.argv, spec.cwd, {
         ...BASE_ENV,
         ...(spec.env as Record<string, string> | undefined),
@@ -214,11 +237,10 @@ class RemoteHandle implements SubprocessHandle {
         reject(error instanceof Error ? error : new Error(String(error)))
       })
     })
-    this.done.finally(() => {
-      offOutput(); offExit()
-      this.stdoutPass?.end()
-      this.stderrPass?.end()
-    })
+    void this.done.then(
+      () => { offOutput(); offExit(); this.stdoutPass?.end(); this.stderrPass?.end() },
+      () => { offOutput(); offExit(); this.stdoutPass?.end(); this.stderrPass?.end() },
+    )
 
     spec.signal?.addEventListener('abort', () => this.terminate(), { once: true })
   }
@@ -296,7 +318,10 @@ export class RemoteSubprocessRuntime extends SubprocessBase {
     const transport = (this.ctx as unknown as { sshTransport: ExecTransport }).sshTransport
     const handle = new RemoteHandle(transport, spec, ++this.pidSeq)
     this.live.add(handle)
-    void handle.done.finally(() => this.live.delete(handle))
+    void handle.done.then(
+      () => this.live.delete(handle),
+      () => this.live.delete(handle),
+    )
     return handle
   }
 

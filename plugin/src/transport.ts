@@ -296,6 +296,11 @@ export class ExecTransport {
     await this.rpc('fs/createDirectory', { path: pathToFileURL(absPath).href })
   }
 
+  /** fs/copy — copy a file. */
+  async fsCopy(fromAbs: string, toAbs: string): Promise<void> {
+    await this.rpc('fs/copy', { from: pathToFileURL(fromAbs).href, to: pathToFileURL(toAbs).href })
+  }
+
   /** Run a short command to completion, collecting all output (probe helper). */
   async runCollect(argv: readonly string[], cwd: string, env: Record<string, string>, timeoutMs = 15000): Promise<{
     exitCode: number | null
