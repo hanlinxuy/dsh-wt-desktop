@@ -309,3 +309,15 @@ dshssh/
 - ZCode：[Remote Development](https://zcode.z.ai/en/docs/remote-development) · [中文版](https://zcode.z.ai/cn/docs/remote-development)
 - DSH：`@deepseek-ai/dsh-commands`、`dsh-client-ui-commands`、`dsh-client-ui-slots`、`dsh-subagent`、
   `dsh-tools`（已读 lib 源码）；官方提案 note `2026-07-07-claude-code-and-codex-subagent-backends`
+
+## 9. 测试政策（学自上游 deepseek-harness / deepseek-harness-desktop）
+
+- **分层**（`plugin/test/`，vitest）：
+  - `smoke.spec.ts` — unit/integration（真实自建 exec-server + 真实插件装配，非 mock——上游铁律「优先真实实现」）
+  - `adversarial.spec.ts` — 协议/路径/token/资源对抗
+  - `manager.spec.ts` — runtime 管理器单测
+  - `built-bin.spec.ts` — **测真实入口路径**：plain node 启动构建后 `lib/exec-server.js`（上游铁律）
+  - `e2e-remote.spec.ts` — 真实远端 seam（`DSSH_E2E_HOST` 提供才跑，无则自跳过；断言外部重跑 uname 对比——「验证世界而非自述」）
+  - `harness.ts` — 共享装配（上游 `tests/harness.ts` 模式）
+- **覆盖率门槛**（`pnpm test:coverage`）：当前基线 74% 行 / 71% 函数 / 51% 分支（防回归；上游目标按文件 100%，HTTP 路由与真实 SSH 路径由 e2e 兜底）
+- **CI**（`.github/workflows/ci.yml`，仿上游 desktop）：变更分类（docs-only 跳过产品门）→ 产品门（typecheck+build+vitest+coverage+脚本语法）→ macOS 近端 lane（自建 runtime 在 mac 启动）

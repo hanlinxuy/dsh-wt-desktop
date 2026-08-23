@@ -97,6 +97,7 @@ async function main() {
   // 8) 符号链接逃逸（工作区内 symlink 指向外部）
   {
     writeFileSync('/tmp/dshssh-secret.txt', 'TOP-SECRET')
+    rmSync(`${base}/evil-link`, { force: true })
     symlinkSync('/tmp/dshssh-secret.txt', `${base}/evil-link`)
     const ctx = new Context()
     const fiber = ctx.plugin(plugin, { url: ws.url, token: 'adv-token', cwd: base })
