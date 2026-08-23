@@ -45,8 +45,9 @@ const FsErrorCtor = (FsModule as unknown as {
 }).FsError
 
 function fsError(message: string, code: string): Error {
-  if (FsErrorCtor !== undefined) return new FsErrorCtor(message, code)
-  return new Error(`${code}: ${message}`)
+  const tagged = `[${code}] ${message}`
+  if (FsErrorCtor !== undefined) return new FsErrorCtor(tagged, code)
+  return new Error(tagged)
 }
 
 function versionOf(size: number, mtimeMs: number | undefined): string {

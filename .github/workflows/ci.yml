@@ -1,0 +1,113 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DSH_TELEMETRY_DISABLED: '1'
+
+jobs:
+  # 变更分类：docs-only 跳过产品门（上游 desktop 模式）。
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      product: ${{ steps.scope.outputs.product }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - name: Classify changed paths
+        id: scope
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$BASE_SHA" || "$BASE_SHA" =~ ^0+$ ]]; then
+            echo "product=true" >> "$GITHUB_OUTPUT"
+          else
+            git diff --check "$BASE_SHA" "$HEAD_SHA"
+            if git diff --name-only "$BASE_SHA" "$HEAD_SHA" | grep -qE '^(plugin/(src|test)|scripts|runtime|\.github)/'; then
+              echo "product=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "product=false" >> "$GITHUB_OUTPUT"
+            fi
+          fi
+
+  # 产品门：build + typecheck + keyless 测试 + 覆盖率门槛（上游 dsh 分层政策）。
+  check:
+    needs: changes
+    if: needs.changes.outputs.product == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: plugin
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - name: Enable pnpm
+        run: corepack enable
+      - name: Install
+        run: pnpm install --frozen-lockfile=false --config.confirmModulesPurge=false
+      - name: Typecheck
+        run: pnpm typecheck
+      - name: Build (host + runtime + client bundles)
+        run: pnpm build
+      - name: Unit + integration + adversarial (vitest, keyless)
+        run: pnpm test
+      - name: Coverage gate
+        run: pnpm test:coverage
+      - name: Shell syntax check (macOS/Linux near-end scripts)
+        working-directory: ..
+        run: |
+          for f in scripts/*.sh; do bash -n "$f"; done
+          node --check scripts/smoke-exec.mjs
+      - name: Built-artifact smoke (real entry path)
+        working-directory: ..
+        run: node plugin/test/built-bin.spec.ts 2>/dev/null || (cd plugin && pnpm vitest run test/built-bin.spec.ts)
+
+  # macOS 近端冒烟：脚本可执行位 + exec-server 在 mac 上启动（自建 runtime 的近端兼容）。
+  macos:
+    needs: changes
+    if: needs.changes.outputs.product == 'true'
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - name: Shell syntax (macOS bash 3.2 兼容性由 bash -n 兜底)
+        run: |
+          for f in scripts/*.sh; do bash -n "$f"; done
+      - name: Exec-server boots on macOS
+        working-directory: plugin
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile=false --config.confirmModulesPurge=false
+          pnpm build
+          node lib/exec-server.js --listen ws://127.0.0.1:0 --token ci-mac --allow-cwd /tmp &
+          SERVER_PID=$!
+          sleep 2
+          kill $SERVER_PID
